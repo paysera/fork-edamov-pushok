@@ -23,6 +23,13 @@ class ResponseTest extends TestCase
         $this->assertEquals(200, $response->getStatusCode());
     }
 
+    public function testEmptyHeadersAndBody()
+    {
+        $response = new Response(200, '', '');
+
+        $this->assertEquals(200, $response->getStatusCode());
+    }
+
     public function testGetApnsId()
     {
         $response = new Response(200, 'apns-id: 123', 'body');
