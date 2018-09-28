@@ -220,6 +220,10 @@ class Response implements ApnsResponseInterface
      */
     public function getReasonPhrase(): string
     {
+        if (!isset(self::$errorReasons[$this->statusCode])) {
+            return '';
+        }
+
         return self::$reasonPhrases[$this->statusCode] ?: '';
     }
 
@@ -240,6 +244,10 @@ class Response implements ApnsResponseInterface
      */
     public function getErrorDescription(): string
     {
+        if (!isset(self::$errorReasons[$this->statusCode])) {
+            return '';
+        }
+
         if (isset(self::$errorReasons[$this->statusCode][$this->errorReason])) {
             return self::$errorReasons[$this->statusCode][$this->errorReason];
         }

@@ -11,6 +11,8 @@
 
 namespace Pushok;
 
+use Psr\Log\LoggerInterface;
+
 /**
  * Class Client
  * @package Pushok
@@ -67,15 +69,25 @@ class Client
     private $curlMultiHandle;
 
     /**
+     * @var LoggerInterface
+     */
+    private $logger;
+
+    /**
      * Client constructor.
      *
      * @param AuthProviderInterface $authProvider
      * @param bool $isProductionEnv
+     * @param LoggerInterface|null $logger
      */
-    public function __construct(AuthProviderInterface $authProvider, bool $isProductionEnv = false)
-    {
+    public function __construct(
+        AuthProviderInterface $authProvider,
+        bool $isProductionEnv = false,
+        LoggerInterface $logger = null
+    ) {
         $this->authProvider = $authProvider;
         $this->isProductionEnv = $isProductionEnv;
+        $this->logger = $logger;
     }
 
     /**
@@ -111,6 +123,10 @@ class Client
                 break;
             }
 
+            if ($running && curl_multi_select($mh) === -1) {
+                usleep(250);
+            }
+
             while ($done = curl_multi_info_read($mh)) {
                 $handle = $done['handle'];
 
@@ -118,6 +134,10 @@ class Client
 
                 // find out which token the response is about
                 $token = curl_getinfo($handle, CURLINFO_PRIVATE);
+
+                if ($this->logger !== null) {
+                    $this->logger->info('Got response from APNS', [$result]);
+                }
 
                 $responseParts = explode("\r\n\r\n", $result, 2);
                 $headers = '';
@@ -129,6 +149,17 @@ class Client
                     $body = $responseParts[1];
                 }
                 $statusCode = curl_getinfo($handle, CURLINFO_HTTP_CODE);
+                if ($statusCode === 0) {
+                    if ($this->logger !== null) {
+                        $this->logger->error(
+                            'Unable to extract HTTP_CODE',
+                            [
+                                'result' => $result,
+                                'curl_error' => curl_multi_errno($mh),
+                            ]
+                        );
+                    }
+                }
                 $responseCollection[] = new Response($statusCode, $headers, $body, $token);
                 curl_multi_remove_handle($mh, $handle);
                 curl_close($handle);
@@ -141,8 +172,7 @@ class Client
         } while ($running);
 
         if ($this->autoCloseConnections) {
-            curl_multi_close($mh);
-            $this->curlMultiHandle = null;
+            $this->close();
         }
 
         return $responseCollection;
@@ -214,6 +244,7 @@ class Client
             curl_multi_close($this->curlMultiHandle);
             $this->curlMultiHandle = null;
         }
+        $this->notifications = [];
     }
 
     /**
