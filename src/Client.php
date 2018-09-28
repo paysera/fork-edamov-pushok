@@ -155,7 +155,7 @@ class Client
                             'Unable to extract HTTP_CODE',
                             [
                                 'result' => $result,
-                                'curl_error' => curl_multi_errno($mh),
+                                'notifications' => $this->notifications,
                             ]
                         );
                     }
