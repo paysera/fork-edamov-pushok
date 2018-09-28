@@ -220,7 +220,7 @@ class Response implements ApnsResponseInterface
      */
     public function getReasonPhrase(): string
     {
-        if (!isset(self::$errorReasons[$this->statusCode])) {
+        if (!isset(self::$reasonPhrases[$this->statusCode])) {
             return '';
         }
 
