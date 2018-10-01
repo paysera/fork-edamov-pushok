@@ -20,13 +20,6 @@ use Psr\Log\LoggerInterface;
 class Client
 {
     /**
-     * Array of notifications.
-     *
-     * @var Notification[]
-     */
-    private $notifications = [];
-
-    /**
      * Authentication provider.
      *
      * @var AuthProviderInterface
@@ -64,7 +57,7 @@ class Client
     /**
      * Current curl_multi handle instance.
      *
-     * @var Object
+     * @var resource
      */
     private $curlMultiHandle;
 
@@ -77,25 +70,26 @@ class Client
      * Client constructor.
      *
      * @param AuthProviderInterface $authProvider
+     * @param LoggerInterface $logger
      * @param bool $isProductionEnv
-     * @param LoggerInterface|null $logger
      */
     public function __construct(
         AuthProviderInterface $authProvider,
-        bool $isProductionEnv = false,
-        LoggerInterface $logger = null
+        LoggerInterface $logger,
+        bool $isProductionEnv = false
     ) {
         $this->authProvider = $authProvider;
-        $this->isProductionEnv = $isProductionEnv;
         $this->logger = $logger;
+        $this->isProductionEnv = $isProductionEnv;
     }
 
     /**
      * Push notifications to APNs.
      *
+     * @param Notification[]
      * @return ApnsResponseInterface[]
      */
-    public function push(): array
+    public function push(array $notifications): array
     {
         if (!$this->curlMultiHandle) {
             $this->curlMultiHandle = curl_multi_init();
@@ -109,10 +103,11 @@ class Client
         }
 
         $mh = $this->curlMultiHandle;
+        $responseCollection = [];
 
         $i = 0;
-        while (!empty($this->notifications) && $i++ < $this->nbConcurrentRequests) {
-            $notification = array_pop($this->notifications);
+        while (!empty($notifications) && $i++ < $this->nbConcurrentRequests) {
+            $notification = array_pop($notifications);
             curl_multi_add_handle($mh, $this->prepareHandle($notification));
         }
 
@@ -135,10 +130,6 @@ class Client
                 // find out which token the response is about
                 $token = curl_getinfo($handle, CURLINFO_PRIVATE);
 
-                if ($this->logger !== null) {
-                    $this->logger->info('Got response from APNS', [$result]);
-                }
-
                 $responseParts = explode("\r\n\r\n", $result, 2);
                 $headers = '';
                 $body = '';
@@ -150,22 +141,20 @@ class Client
                 }
                 $statusCode = curl_getinfo($handle, CURLINFO_HTTP_CODE);
                 if ($statusCode === 0) {
-                    if ($this->logger !== null) {
-                        $this->logger->error(
-                            'Unable to extract HTTP_CODE',
-                            [
-                                'result' => $result,
-                                'notifications' => $this->notifications,
-                            ]
-                        );
-                    }
+                    $this->logger->error(
+                        'Unable to extract HTTP_CODE',
+                        [
+                            'result' => $result,
+                            'notifications' => $notifications,
+                        ]
+                    );
                 }
                 $responseCollection[] = new Response($statusCode, $headers, $body, $token);
                 curl_multi_remove_handle($mh, $handle);
                 curl_close($handle);
 
-                if (!empty($this->notifications)) {
-                    $notification = array_pop($this->notifications);
+                if (!empty($notifications)) {
+                    $notification = array_pop($notifications);
                     curl_multi_add_handle($mh, $this->prepareHandle($notification));
                 }
             }
@@ -178,10 +167,43 @@ class Client
         return $responseCollection;
     }
 
+    public function pushOne(Notification $notification)
+    {
+        $curl = $this->prepareHandle($notification);
+        $output = curl_exec($curl);
+
+        if (curl_errno($curl) > 0) {
+            $this->logger->error(
+                'Got curl error while sending ANPS',
+                [
+                    'err_no' => curl_errno($curl),
+                    'notification' => $notification->getPayload()->toJson(),
+                ]
+            );
+        }
+
+        $responseParts = explode("\r\n\r\n", $output, 2);
+        $headers = '';
+        $body = '';
+        if (isset($responseParts[0])) {
+            $headers = $responseParts[0];
+        }
+        if (isset($responseParts[1])) {
+            $body = $responseParts[1];
+        }
+        $statusCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        $token = curl_getinfo($curl, CURLINFO_PRIVATE);
+
+        curl_close($curl);
+
+        return new Response($statusCode, $headers, $body, $token);
+    }
+
     /**
      * Prepares a curl handle from a Notification object.
      *
      * @param Notification $notification
+     * @return resource
      */
     private function prepareHandle(Notification $notification)
     {
@@ -200,42 +222,6 @@ class Client
     }
 
     /**
-     * Add notification in queue for sending.
-     *
-     * @param Notification $notification
-     */
-    public function addNotification(Notification $notification)
-    {
-        $this->notifications[] = $notification;
-    }
-
-    /**
-     * Add several notifications in queue for sending.
-     *
-     * @param Notification[] $notifications
-     */
-    public function addNotifications(array $notifications)
-    {
-        foreach ($notifications as $notification) {
-            if (in_array($notification, $this->notifications, true)) {
-                continue;
-            }
-
-            $this->addNotification($notification);
-        }
-    }
-
-    /**
-     * Get already added notifications.
-     *
-     * @return Notification[]
-     */
-    public function getNotifications(): array
-    {
-        return $this->notifications;
-    }
-
-    /**
      * Close the current curl multi handle.
      */
     public function close()
@@ -244,7 +230,6 @@ class Client
             curl_multi_close($this->curlMultiHandle);
             $this->curlMultiHandle = null;
         }
-        $this->notifications = [];
     }
 
     /**
@@ -261,7 +246,7 @@ class Client
     /**
      * Set the number of maximum concurrent connections established to the APNS servers.
      *
-     * @param int $nbConcurrentRequests
+     * @param int $maxConcurrentConnections
      */
     public function setMaxConcurrentConnections($maxConcurrentConnections)
     {
@@ -269,10 +254,10 @@ class Client
     }
 
     /**
-     * Set wether or not the client should automatically close the connections. Apple recommends keeping
+     * Set whether or not the client should automatically close the connections. Apple recommends keeping
      * connections open if you send more than a few notification per minutes.
      *
-     * @param bool $nbConcurrentRequests
+     * @param bool $autoCloseConnections
      */
     public function setAutoCloseConnections($autoCloseConnections)
     {

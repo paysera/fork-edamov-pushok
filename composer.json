@@ -21,12 +21,13 @@
     "require": {
         "php": "^7.0",
         "ext-curl": "*",
-        "lib-curl": ">=7.46.0",
-        "ext-openssl": "*",
-        "lib-openssl": ">=1.0.2.5",
         "ext-gmp": "*",
-        "ext-xml": "*",
         "ext-intl": "*",
+        "ext-openssl": "*",
+        "ext-xml": "*",
+        "lib-curl": ">=7.46.0",
+        "lib-openssl": ">=1.0.2.5",
+        "psr/log": "^1.0",
         "spomky-labs/jose": "^7.0.0"
     },
     "require-dev": {
@@ -45,7 +46,6 @@
             "edamov\\pushok\\": "tests"
         }
     },
-    "minimum-stability": "dev",
     "scripts": {
         "test": "phpunit",
         "check-style": "phpcs -p --standard=PSR2 --runtime-set ignore_errors_on_exit 1 --runtime-set ignore_warnings_on_exit 1 src tests",
